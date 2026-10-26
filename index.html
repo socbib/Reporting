@@ -97,14 +97,9 @@ button,input,select,textarea{font:inherit}button{cursor:pointer}
     </section>
 
     <section class="section">
-      <div class="section-head"><div class="section-title"><span class="section-number">05</span><h2>Handover Confirmation</h2></div><span class="counter">CONFIRM & SIGN OFF</span></div>
+      <div class="section-head"><div class="section-title"><span class="section-number">05</span><h2>Sign-off</h2></div></div>
       <div class="section-body">
-        <div class="checklist confirmation-list">
-          <label class="check"><input type="checkbox" name="confirmEscalations"><span>All critical incidents and escalations were communicated.</span></label>
-          <label class="check"><input type="checkbox" name="confirmOwners"><span>Every pending task has an owner and next action.</span></label>
-          <label class="check"><input type="checkbox" name="confirmReviewed"><span>Incoming analyst reviewed the outstanding items.</span></label>
-        </div>
-        <div class="table-wrap" style="margin-top:16px"><table class="handover-table sign-table"><thead><tr><th>Outgoing analyst / signature</th><th>Incoming analyst / signature</th><th>Time</th></tr></thead><tbody><tr>
+        <div class="table-wrap"><table class="handover-table sign-table"><thead><tr><th>Outgoing analyst / signature</th><th>Incoming analyst / signature</th><th>Time</th></tr></thead><tbody><tr>
           <td><input id="outgoingSign" name="outgoingSign" aria-label="Outgoing analyst signature" placeholder="Name / signature" required></td>
           <td><input id="incomingSign" name="incomingSign" aria-label="Incoming analyst signature" placeholder="Name / signature" required></td>
           <td><input id="signTime" name="signTime" type="time" aria-label="Sign-off time"></td>
@@ -121,6 +116,7 @@ button,input,select,textarea{font:inherit}button{cursor:pointer}
   </footer>
 </main>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 <script>
 const sections = [
 {title:"QRadar / Security Monitoring",items:[
@@ -189,8 +185,8 @@ function updateDashboard() {
 form.addEventListener("input", () => { updateDashboard(); saveStatus.textContent = "● Form updated"; });
 form.addEventListener("change", () => { updateDashboard(); saveStatus.textContent = "● Form updated"; });
 
-// Opens a simple email draft in the computer's default email app (Outlook, if configured).
-// The PDF button opens the print dialog first; when that dialog closes, it requests the Outlook draft.
+// Opens an Outlook draft. Browser security does not allow a plain webpage
+// to attach a locally downloaded file to an email automatically.
 function emailHandover() {
   const recipients = [
     "tewodros.wondu@berhanbanksc.com",
@@ -198,12 +194,12 @@ function emailHandover() {
     "sasebih.nega@berhanbanksc.com"
   ].join(";");
   const get = id => document.getElementById(id)?.value?.trim() || "";
-  const shift = [...document.querySelectorAll('input[name="shift"]:checked')].map(x => x.value).join(", ") || get("shift") || "Shift not specified";
+  const shift = get("shift") || "Shift not specified";
   const subject = `Berhan Bank SOC Shift Handover - ${get("date") || "No date"} - ${shift}`;
   const body = [
     "Dear Team,",
     "",
-    "Please find the SOC shift handover report details below.",
+    "Please find the SOC shift handover report attached.",
     `Date: ${get("date")}`,
     `Shift: ${shift}`,
     `Handover time: ${get("handoverTime")}`,
@@ -211,16 +207,50 @@ function emailHandover() {
     `Incoming analyst: ${get("incoming")}`,
     `Shift lead: ${get("lead")}`,
     "",
-    "Please attach the PDF report before sending.",
+    "Please attach the downloaded SOC Shift Handover PDF before sending.",
     "",
     "Regards,",
     "SOC Team"
   ].join("\n");
   const mailto = `mailto:${recipients}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   window.location.href = mailto;
-  saveStatus.textContent = "● Outlook email draft requested";
+  saveStatus.textContent = "● Outlook draft opened — attach the downloaded PDF before sending";
 }
 
+async function createPdfAndOpenOutlook() {
+  const button = document.getElementById("pdfOutlookBtn");
+  button.disabled = true;
+  const oldLabel = button.textContent;
+  button.textContent = "Creating PDF…";
+  saveStatus.textContent = "● Preparing handover PDF…";
+  try {
+    if (!window.html2pdf) {
+      throw new Error("PDF generator could not load. Check your internet connection and try again.");
+    }
+    const element = document.querySelector("main.container");
+    const filename = `Berhan_Bank_SOC_Shift_Handover_${document.getElementById("date").value || localDate()}_${(document.getElementById("shift").value || "Shift").replace(/[^a-z0-9_-]/gi, "_")}.pdf`;
+    const options = {
+      margin: [8, 8, 8, 8],
+      filename,
+      image: { type: "jpeg", quality: 0.96 },
+      html2canvas: { scale: 1.5, useCORS: true, backgroundColor: "#ffffff", scrollY: 0 },
+      jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
+      pagebreak: { mode: ["css", "legacy"] },
+      ignoreElements: el => el.classList?.contains("toolbar")
+    };
+    await html2pdf().set(options).from(element).save();
+    saveStatus.textContent = "● PDF downloaded — opening Outlook draft…";
+    // Let the browser initiate the file download before requesting the mail app.
+    setTimeout(emailHandover, 900);
+  } catch (err) {
+    console.error(err);
+    saveStatus.textContent = "● PDF creation failed: " + (err.message || "Please try again");
+    alert("The PDF could not be created. Please check your internet connection and try again.\n\n" + (err.message || "Unknown error"));
+  } finally {
+    button.disabled = false;
+    button.textContent = oldLabel;
+  }
+}
 function localDate() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
@@ -229,19 +259,7 @@ function localTime() {
   const d = new Date();
   return `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
 }
-let openOutlookAfterPrint = false;
-
-// Once the user closes the print dialog (after saving or cancelling), request an Outlook draft.
-window.addEventListener("afterprint", () => {
-  if (!openOutlookAfterPrint) return;
-  openOutlookAfterPrint = false;
-  emailHandover();
-});
-
-document.getElementById("pdfOutlookBtn").addEventListener("click", () => {
-  openOutlookAfterPrint = true;
-  window.print();
-});
+document.getElementById("pdfOutlookBtn").addEventListener("click", createPdfAndOpenOutlook);
 
 document.getElementById("date").value = localDate();
 document.getElementById("handoverTime").value = localTime();
